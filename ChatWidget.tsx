@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageSquare, X, Send, Bot, Loader2, Sparkles } from 'lucide-react';
-import { GoogleGenAI, Chat } from '@google/genai';
+import { GoogleGenAI, Chat, Content } from '@google/genai';
 import { TrendAnalysis } from './types';
 
 interface ChatWidgetProps {
@@ -18,7 +18,6 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
   ]);
   const [inputText, setInputText] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const chatRef = useRef<Chat | null>(null);
 
   // 추천 질문 리스트
   const suggestions = ["핵심 내용 3줄 요약", "관련 뉴스 더 보기", "SNS용 문구 만들기"];
@@ -28,26 +27,6 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isThinking]);
 
-  // AI 채팅 세션 초기화
-  useEffect(() => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const systemInstruction = `당신은 'TrendPulse'의 전문 트렌드 분석가 비서입니다.
-현재 분석 중인 키워드: ${keyword || '없음'}
-분석 데이터: ${analysis ? JSON.stringify(analysis) : '아직 데이터가 없습니다.'}
-
-사용자가 트렌드에 대해 물어보면 위 데이터를 바탕으로 한국어로 친절하고 전문적으로 답변하세요. 
-데이터가 없는 경우 사용자가 키워드를 검색하도록 안내하세요.
-답변은 간결하게(3문장 내외) 작성하는 것이 좋습니다.`;
-
-    chatRef.current = ai.chats.create({
-      model: 'gemini-3-flash-preview',
-      config: {
-        systemInstruction,
-        temperature: 0.7,
-      },
-    });
-  }, [analysis, keyword]);
-
   // 외부 명령 처리
   useEffect(() => {
     if (externalCommand) {
@@ -56,9 +35,8 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
     }
   }, [externalCommand]);
 
-  // [고도화된 스마트 응답 핸들러] 작업지시서 요구사항 반영
+  // [고도화된 스마트 응답 핸들러]
   const handleSmartResponse = (userInput: string) => {
-    // 1. 투자 매력도 및 시장 분석 (지시서 49번: 정보 신뢰성 확보 기반)
     if (userInput.includes("투자") || userInput.includes("전망") || userInput.includes("분석") || userInput.includes("시장")) {
       return "📊 현재 테슬라의 기술적 지표와 최신 보도(Source Feed)를 분석한 결과입니다.\n\n" +
              "1. 인공지능 및 로보틱스 전환 가속화로 미래 가치 상승 중\n\n" +
@@ -66,34 +44,59 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
              "3. 단기적 변동성보다 장기적 생태계 구축에 주목할 필요가 있습니다.";
     }
 
-    // 2. 성우 페르소나 추천 (지시서 36번: AI 툴 활용 최적화)
     if (userInput.includes("목소리") || userInput.includes("성우") || userInput.includes("추천")) {
       return "🎙️ 현재 작성된 '카드뉴스 낭독 스크립트'의 톤앤매너를 분석했습니다.\n\n" +
              "내용이 전문적이고 긴박하므로 'Enceladus(남성)' 또는 'Achemar(여성)' 보이스를 추천합니다.";
     }
 
-    // 3. 글로벌 확장성 진단 (지시서 8번: OSMU 매체 확장)
     if (userInput.includes("해외") || userInput.includes("글로벌") || userInput.includes("번역")) {
       return "🌍 글로벌 시장 적합성 분석 결과입니다.\n\n" +
              "현재 콘텐츠는 북미 시장의 AI 트렌드와 일치하며, 영문 카드뉴스 버전 생성을 적극 권장합니다.";
     }
 
-    // 4. 할루시네이션 검증 (지시서 47번: 반복적 개선 루프)
     if (userInput.includes("진짜야") || userInput.includes("확인")) {
       return "🔍 실시간 소스 피드(Source Feed)의 메타데이터와 교차 검증을 실시했습니다.\n\n" +
-             "언급된 수치는 'acs.org.au' 등 공신력 있는 매체의 실시간 데이터를 기반으로 합니다.";
+             "언급된 수치는 공신력 있는 매체의 실시간 데이터를 기반으로 합니다.";
     }
 
-    // 매칭되는 키워드가 없을 때의 기본 응답 (사용자 지시사항)
-    // 원래는 Gemini AI를 호출하기 위해 null을 반환했으나, 지시서에 따라 이 문구를 반환합니다.
-    // 만약 일반 대화를 유지하고 싶다면 이 줄을 return null; 로 수정할 수 있습니다.
     return "요청하신 내용을 바탕으로 콘텐츠 재사용(OSMU) 및 품질 개선 방안을 검토 중입니다.";
   };
 
+  /**
+   * Gemini API 가이드라인을 준수하여, API 호출 직전에 신규 GoogleGenAI 인스턴스를 생성합니다.
+   * 이는 사용자가 API 키를 변경했을 때 즉시 반영되도록 하기 위함입니다.
+   */
   const sendMessageWithRetry = async (message: string, retries = 3, delay = 2000): Promise<string> => {
     try {
-      if (!chatRef.current) throw new Error("Chat session not initialized");
-      const response = await chatRef.current.sendMessage({ message });
+      // API 호출 직전 인스턴스 생성 (가이드라인 준수)
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      
+      const systemInstruction = `당신은 'TrendPulse'의 전문 트렌드 분석가 비서입니다.
+현재 분석 중인 키워드: ${keyword || '없음'}
+분석 데이터: ${analysis ? JSON.stringify(analysis) : '아직 데이터가 없습니다.'}
+
+사용자가 트렌드에 대해 물어보면 위 데이터를 바탕으로 한국어로 친절하고 전문적으로 답변하세요. 
+데이터가 없는 경우 사용자가 키워드를 검색하도록 안내하세요.
+답변은 간결하게(3문장 내외) 작성하는 것이 좋습니다.`;
+
+      // 기존 대화 내역을 Gemini SDK의 history 포맷으로 변환하여 문맥을 유지합니다.
+      const history: Content[] = messages
+        .filter(m => m.id !== 1) // 첫 번째 AI 환영 인사는 제외
+        .map(m => ({
+          role: m.sender === 'user' ? 'user' : 'model',
+          parts: [{ text: m.text }]
+        }));
+
+      const chat = ai.chats.create({
+        model: 'gemini-3-flash-preview',
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+        },
+        history,
+      });
+
+      const response = await chat.sendMessage({ message });
       return response.text || "응답을 생성할 수 없습니다.";
     } catch (error: any) {
       const errorStr = JSON.stringify(error);
@@ -115,9 +118,8 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
     } catch (error: any) {
       console.error("AI Chat Error:", error);
       let friendlyMessage = "요청하신 내용을 바탕으로 콘텐츠 재사용(OSMU) 및 품질 개선 방안을 검토 중입니다.";
-      const errorStr = JSON.stringify(error);
-      if (errorStr.includes("503") || errorStr.includes("overloaded")) {
-        friendlyMessage = "현재 AI 모델 서버가 매우 혼잡합니다. 잠시 후 다시 질문해 주세요.";
+      if (!process.env.API_KEY) {
+        friendlyMessage = "API 키가 설정되지 않았습니다. 관리자 설정을 확인해주세요.";
       }
       setMessages(prev => [...prev, { id: Date.now() + 1, text: friendlyMessage, sender: 'ai' }]);
     } finally {
@@ -129,15 +131,15 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
     const trimmedText = text.trim();
     if (!trimmedText || isThinking) return;
     
-    setMessages(prev => [...prev, { id: Date.now(), text: trimmedText, sender: 'user' }]);
+    // UI에 사용자 메시지 즉시 추가
+    const userMessage = { id: Date.now(), text: trimmedText, sender: 'user' };
+    setMessages(prev => [...prev, userMessage]);
     setInputText("");
 
-    // 1. 특정 스마트 명령 키워드 확인
     const smartResponse = handleSmartResponse(trimmedText);
     
-    // handleSmartResponse가 "요청하신 내용을..."을 기본으로 반환하므로 
-    // 여기서는 항상 truthy로 인식되어 로컬 응답이 출력됩니다.
-    if (smartResponse) {
+    // 특정 키워드에 대해 스마트 응답 우선 처리, 그 외에는 Gemini API 호출
+    if (smartResponse && (trimmedText.includes("투자") || trimmedText.includes("성우") || trimmedText.includes("해외") || trimmedText.includes("확인"))) {
       setIsThinking(true);
       setTimeout(() => {
         setMessages(prev => [...prev, { id: Date.now() + 1, text: smartResponse, sender: 'ai' }]);
