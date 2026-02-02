@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageSquare, X, Send, Bot, Loader2, Sparkles } from 'lucide-react';
 import { GoogleGenAI, Chat, Content } from '@google/genai';
@@ -216,7 +215,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
                     ? 'bg-indigo-600 text-white rounded-tr-none' 
                     : 'bg-white/5 text-slate-200 border border-white/5 rounded-tl-none'
                 }`}>
-                  {msg.text}
+                  {msg.text.replace(/\\n/g, '\n')}
                 </div>
               </div>
             ))}
