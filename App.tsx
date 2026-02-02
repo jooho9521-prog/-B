@@ -58,11 +58,14 @@ const App: React.FC = () => {
     setTimeout(() => setToast({ visible: false, message: '' }), 2500);
   };
 
-  // 앱 시작 시 localStorage에서 키를 불러와 process.env.API_KEY에 주입
+  // 앱 초기 로드 시 localStorage에서 키를 불러와 전역 환경 변수에 주입
   useEffect(() => {
     const savedKey = localStorage.getItem('gemini_api_key');
     if (savedKey && typeof window !== 'undefined') {
-      (window as any).process.env.API_KEY = savedKey;
+      const win = window as any;
+      win.process = win.process || { env: {} };
+      win.process.env = win.process.env || {};
+      win.process.env.API_KEY = savedKey;
     }
   }, []);
 
@@ -77,9 +80,11 @@ const App: React.FC = () => {
     // 1. LocalStorage 저장
     localStorage.setItem('gemini_api_key', trimmedKey);
     
-    // 2. 전역 process.env 업데이트 (Gemini SDK 가이드라인 준수용)
+    // 2. 전역 process.env 업데이트 (신규 생성되는 Gemini SDK 인스턴스가 즉시 사용 가능하도록)
     if (typeof window !== 'undefined') {
-      (window as any).process.env.API_KEY = trimmedKey;
+      const win = window as any;
+      win.process = win.process || { env: {} };
+      win.process.env.API_KEY = trimmedKey;
     }
     
     showToast("API 키가 성공적으로 저장되었습니다.");
@@ -88,7 +93,7 @@ const App: React.FC = () => {
   };
 
   const handleSearch = useCallback(async (e?: React.FormEvent) => {
-    // 이벤트 전파 및 기본 동작 차단 (Vercel 환경 충돌 방지)
+    // 폼 제출 이벤트 전파 및 기본 동작(새로고침)을 확실히 차단
     if (e) {
       e.preventDefault();
       e.stopPropagation();
@@ -97,7 +102,7 @@ const App: React.FC = () => {
     const targetKeyword = state.keyword;
     if (!targetKeyword.trim()) return;
 
-    // API 키 확인 (localStorage와 process.env를 모두 체크)
+    // API 키 확인 (우선순위: 전역 변수 -> LocalStorage)
     const currentApiKey = (window as any).process?.env?.API_KEY || localStorage.getItem('gemini_api_key');
     
     if (!currentApiKey) {
@@ -106,7 +111,7 @@ const App: React.FC = () => {
       return;
     }
 
-    // 로드 중이 아닐 때만 실행
+    // 이미 로딩 중이면 중복 실행 방지
     if (state.isLoading) return;
 
     setState(prev => ({ ...prev, isLoading: true, error: null, results: [], analysis: null }));
@@ -133,7 +138,7 @@ const App: React.FC = () => {
       }
     } catch (err: any) {
       setState(prev => ({ ...prev, isLoading: false, error: err.message || '오류 발생' }));
-      showToast("분석 중 오류가 발생했습니다. API 키를 확인해주세요.");
+      showToast("분석 엔진 호출에 실패했습니다. API 키를 확인해주세요.");
     }
   }, [state.keyword, state.isLoading]);
 
@@ -239,7 +244,7 @@ const App: React.FC = () => {
           <button 
             type="button"
             onClick={() => {
-              const currentKey = (window as any).process?.env?.API_KEY || localStorage.getItem('gemini_api_key') || '';
+              const currentKey = localStorage.getItem('gemini_api_key') || '';
               setTempApiKey(currentKey);
               setIsKeyModalOpen(true);
             }}
@@ -262,9 +267,11 @@ const App: React.FC = () => {
                 onChange={(e) => setState(prev => ({ ...prev, keyword: e.target.value }))}
                 disabled={state.isLoading}
               />
+              {/* 돋보기 버튼: type="submit"으로 설정하여 명시적인 클릭 이벤트를 보장합니다. */}
               <button 
                 type="submit" 
-                className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-500 hover:text-indigo-400 transition-colors"
+                title="검색 실행"
+                className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-500 hover:text-indigo-400 transition-colors z-50 pointer-events-auto p-2"
                 disabled={state.isLoading}
               >
                 <Search size={26} />
@@ -407,7 +414,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* API 키 관리 모달 (Vercel 대응 독립 모달) */}
+      {/* API 키 관리 모달 (Vercel 배포 시 window.aistudio 의존성을 제거한 독립형 모달) */}
       {isKeyModalOpen && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/95 backdrop-blur-3xl p-6 animate-in fade-in duration-300">
           <div className="bg-[#0f172a] border border-white/10 rounded-[2.5rem] p-10 w-full max-w-xl shadow-4xl relative overflow-hidden">
