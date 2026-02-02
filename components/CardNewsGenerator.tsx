@@ -20,9 +20,8 @@ interface Props {
   onRegenerate: () => void;
 }
 
-// 폰트 리스트 (작업지시서 기반 20종 확장)
+// 폰트 리스트
 const FONT_OPTIONS = [
-  // 고딕/샌스 세리프 (신뢰감, 뉴스 스타일)
   { name: '노토산스 KR', family: "'Noto Sans KR', sans-serif" },
   { name: '나눔고딕', family: "'Nanum Gothic', sans-serif" },
   { name: '프리텐다드', family: "'Pretendard', sans-serif" },
@@ -30,14 +29,10 @@ const FONT_OPTIONS = [
   { name: '에스코어 드림', family: "'S-CoreDream-4Regular', sans-serif" },
   { name: '검은고딕', family: "'Black Han Sans', sans-serif" },
   { name: 'IBM Plex Sans KR', family: "'IBM Plex Sans KR', sans-serif" },
-
-  // 명조/세리프 (우아함, 감성 스타일)
   { name: '나눔명조', family: "'Nanum Myeongjo', serif" },
   { name: '본명조', family: "'Noto Serif KR', serif" },
   { name: '바탕체', family: "'Batang', serif" },
   { name: '송명', family: "'Song Myung', serif" },
-
-  // 손글씨/디스플레이 (친근함, SNS 스타일)
   { name: '나눔손글씨 펜', family: "'Nanum Pen Script', cursive" },
   { name: '나눔손글씨 붓', family: "'Nanum Brush Script', cursive" },
   { name: '가비아 온해', family: "'Gaegu', cursive" },
@@ -74,33 +69,21 @@ const CardNewsGenerator: React.FC<Props> = ({
 
   const [localWatermark, setLocalWatermark] = useState('실시간 뉴스 리포트');
 
-  // 텍스트 스타일 상태 추가
   const [headlineSize, setHeadlineSize] = useState(88);
   const [bodySize, setBodySize] = useState(42);
   const [selectedFont, setSelectedFont] = useState(FONT_OPTIONS[0].family);
 
-  // [수정 로직: 중복 번호 방지 스마트 파싱]
   const formatPreviewText = (text: string) => {
     if (!text) return "";
-
-    // 1. 역슬래시 n(\n) 문자를 실제 줄바꿈으로 변환 및 불필요한 태그 제거
     let processedText = text.replace(/\\n/g, '\n')
       .replace(/\[제목\]/g, '')
       .replace(/[\*\#\[\]]/g, "")
       .replace(/\(참조:[\s\S]*?\)/gi, '')
       .replace(/https?:\/\/[^\s\)]+/g, '')
       .trim();
-
-    // 2. [핵심] 숫자 번호(1. 2. 3.) 직전에 강제로 줄바꿈 삽입 (문장 중간에 번호가 뭉쳐있을 경우 대비)
     processedText = processedText.replace(/([.!?])\s*(\d+\.)/g, '$1\n$2');
-
-    // 3. 줄바꿈으로 나누어 각 줄 처리
     const lines = processedText.split('\n');
-    const processedLines = lines
-      .map(line => line.trim())
-      .filter(line => line.length > 0);
-
-    // 4. '숫자.'으로 시작하지 않는 줄은 이전 줄에 강제로 붙여 문장 잘림 방지
+    const processedLines = lines.map(line => line.trim()).filter(line => line.length > 0);
     let finalLines: string[] = [];
     processedLines.forEach((line) => {
       if (/^\d+\./.test(line)) {
@@ -111,8 +94,6 @@ const CardNewsGenerator: React.FC<Props> = ({
         finalLines.push(line);
       }
     });
-
-    // 5. 결과 출력 (각 번호 사이에는 확실하게 한 줄씩 띄움)
     return finalLines.join('\n\n');
   };
 
@@ -146,7 +127,6 @@ const CardNewsGenerator: React.FC<Props> = ({
       const maxWidth = 920;
       const startX = 80;
 
-      // 폰트 적용
       ctx.font = `bold ${headlineSize}px ${selectedFont}`;
       const displayHeadline = cleanText(headline);
       const headlineWords = displayHeadline.split(' ');
@@ -168,7 +148,6 @@ const CardNewsGenerator: React.FC<Props> = ({
       ctx.fillRect(startX, headlineY + 45, 180, 10);
       ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
 
-      // 본문 폰트 적용 - 수정된 스마트 파싱 로직 사용
       ctx.font = `500 ${bodySize}px ${selectedFont}`;
       const lineHeight = bodySize * 1.6;
       let contentY = headlineY + 150; 
@@ -218,6 +197,15 @@ const CardNewsGenerator: React.FC<Props> = ({
 
   const handleCreateVeoVideo = async () => {
     if (isVeoLoading) return;
+
+    // API 키 방어 로직
+    const apiKey = localStorage.getItem('gemini_api_key') || (window as any).process?.env?.API_KEY;
+    if (!apiKey) {
+      console.error("API Call Error: Gemini API Key is missing for Veo Video generation.");
+      if (onShowToast) onShowToast("❌ API 키를 먼저 설정해주세요.");
+      return;
+    }
+
     setIsVeoLoading(true);
     setVideoUrl(null);
     if (onShowToast) onShowToast("🚀 Veo AI가 고품질 비디오를 생성 중입니다...");
@@ -227,7 +215,8 @@ const CardNewsGenerator: React.FC<Props> = ({
         setVideoUrl(url);
         if (onShowToast) onShowToast("✅ AI 비디오 생성이 완료되었습니다!");
       }
-    } catch (e) {
+    } catch (e: any) {
+      console.error("API Call Error: Veo Video generation failed.", e);
       if (onShowToast) onShowToast("비디오 생성 중 오류가 발생했습니다.");
     } finally {
       setIsVeoLoading(false);
@@ -245,13 +234,10 @@ const CardNewsGenerator: React.FC<Props> = ({
 
   const handleSaveDB = async (e?: any) => {
     if (e && e.stopPropagation) e.stopPropagation();
-    
     const canvas = canvasRef.current;
     if (!canvas) return alert("이미지 캔버스를 찾을 수 없습니다.");
-
     try {
       const mergedImageUrl = canvas.toDataURL('image/png');
-
       const newCard = {
         id: Date.now(),
         imageUrl: mergedImageUrl,
@@ -264,16 +250,14 @@ const CardNewsGenerator: React.FC<Props> = ({
         text: summary,
         originalBody: summary
       };
-
       const rawData = localStorage.getItem('saved_cards');
       const list = rawData ? JSON.parse(rawData) : [];
       list.unshift(newCard); 
       localStorage.setItem('saved_cards', JSON.stringify(list));
-
-      alert("✅ 카드뉴스가 '설정하신 스타일 그대로' 저장되었습니다!");
+      alert("✅ 카드뉴스가 DB 보관함에 저장되었습니다!");
       if (onShowToast) onShowToast("✅ DB 보관함에 저장되었습니다.");
     } catch (err) {
-      console.error(err);
+      console.error("Save DB Error:", err);
       alert("이미지 저장 중 오류가 발생했습니다.");
     }
   };

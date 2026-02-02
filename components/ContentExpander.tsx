@@ -153,19 +153,10 @@ const ContentExpander: React.FC<Props> = ({ summary, expandedData, setExpandedDa
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // 스크립트 텍스트 정제 함수
   const formatScriptForReader = (text: string) => {
     if (!text) return "";
-
-    let cleaned = text
-      .replace(/\[제목\]/g, '') // 1. "[제목]" 이라는 글자를 찾아 삭제
-      .replace(/\\n/g, '\n')    // 2. 리터럴 줄바꿈 문자 변환
-      .trim();
-
-    // 3. 숫자 뒤에 줄바꿈 강제 삽입 (1. 2. 3. 등 항목별 줄바꿈)
-    // 마침표(.) 뒤에 공백이 있고 바로 숫자가 나오는 패턴을 찾아 줄바꿈 삽입
+    let cleaned = text.replace(/\[제목\]/g, '').replace(/\\n/g, '\n').trim();
     cleaned = cleaned.replace(/([.!?])\s+(\d+\.)/g, '$1\n\n$2');
-
     return cleaned;
   };
 
@@ -210,11 +201,16 @@ const ContentExpander: React.FC<Props> = ({ summary, expandedData, setExpandedDa
   };
 
   const handleTTS = useCallback(async () => {
+    const apiKey = localStorage.getItem('gemini_api_key') || (window as any).process?.env?.API_KEY;
+    if (!apiKey) {
+      onShowToast("❌ API 키를 먼저 설정해주세요.");
+      return;
+    }
+
     if (isSpeaking) {
       stopSpeaking();
       return;
     }
-    // TTS를 보낼 때는 정제된 텍스트를 사용
     const textToRead = formatScriptForReader(expandedData.video || "");
     if (!textToRead.trim()) {
       onShowToast("낭독할 텍스트가 없습니다.");
@@ -250,6 +246,14 @@ const ContentExpander: React.FC<Props> = ({ summary, expandedData, setExpandedDa
   }, [expandedData.video, isSpeaking, selectedGoogleVoice, selectedStylePresetId, playbackRate, onShowToast]);
 
   const handleExpand = async () => {
+    // API 키 방어 로직
+    const apiKey = localStorage.getItem('gemini_api_key') || (window as any).process?.env?.API_KEY;
+    if (!apiKey) {
+      console.error("API Call Error: Gemini API Key is missing for handleExpand.");
+      onShowToast("❌ API 키를 먼저 설정해주세요.");
+      return;
+    }
+
     if (activeType === 'video') {
       handleTTS();
       return;
@@ -271,12 +275,13 @@ const ContentExpander: React.FC<Props> = ({ summary, expandedData, setExpandedDa
           }));
           onShowToast("새로운 카드뉴스가 생성되었습니다.");
         } catch (e) {
-          console.error(e);
+          console.error("Parse or Image Generation Error:", e);
         }
       } else if (activeType === 'sns') {
         setExpandedData(prev => ({ ...prev, sns: rawResponse }));
       }
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Expansion Error:", error);
       onShowToast("콘텐츠 생성 중 오류가 발생했습니다.");
     } finally {
       setLoading(false);
@@ -284,6 +289,12 @@ const ContentExpander: React.FC<Props> = ({ summary, expandedData, setExpandedDa
   };
 
   const handleRegenerateImageOnly = async () => {
+    const apiKey = localStorage.getItem('gemini_api_key') || (window as any).process?.env?.API_KEY;
+    if (!apiKey) {
+      onShowToast("❌ API 키를 먼저 설정해주세요.");
+      return;
+    }
+
     if (isRegeneratingImage || !expandedData.image) return;
     setIsRegeneratingImage(true);
     onShowToast("🔄 테마를 적용하여 이미지를 재생성합니다...");
@@ -302,7 +313,7 @@ const ContentExpander: React.FC<Props> = ({ summary, expandedData, setExpandedDa
         throw new Error("Failed to generate image");
       }
     } catch (err) {
-      console.error(err);
+      console.error("Image Regeneration Error:", err);
       onShowToast("❌ 이미지 재생성에 실패했습니다.");
     } finally {
       setIsRegeneratingImage(false);
