@@ -13,7 +13,10 @@ import {
   X,
   CheckCircle2,
   Sparkles,
-  MessageSquare
+  MessageSquare,
+  ShieldAlert,
+  ExternalLink,
+  Save
 } from 'lucide-react';
 import { GeminiTrendService } from './services/geminiService';
 import { AppState, NewsItem } from './types';
@@ -28,6 +31,8 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'insights'>('dashboard');
   const [theme, setTheme] = useState<ThemeType>('aurora');
   const [showThemeModal, setShowThemeModal] = useState(false);
+  const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
+  const [tempApiKey, setTempApiKey] = useState('');
   
   const [newsSources, setNewsSources] = useState<NewsItem[]>([]);
   
@@ -46,7 +51,6 @@ const App: React.FC = () => {
   });
 
   const [toast, setToast] = useState<{ visible: boolean; message: string }>({ visible: false, message: '' });
-  
   const [chatCommand, setChatCommand] = useState<{ text: string; time: number } | null>(null);
 
   const showToast = (message: string) => {
@@ -54,21 +58,37 @@ const App: React.FC = () => {
     setTimeout(() => setToast({ visible: false, message: '' }), 2500);
   };
 
-  const handleOpenKeySelector = async () => {
-    try {
-      if (window.aistudio && window.aistudio.openSelectKey) {
-        await window.aistudio.openSelectKey();
-        setState(prev => ({ ...prev, error: null }));
-      }
-    } catch (err) {
-      console.error("Key selection failed", err);
+  // API 키 저장 핸들러
+  const handleSaveApiKey = () => {
+    const trimmedKey = tempApiKey.trim();
+    if (!trimmedKey) {
+      showToast("API 키를 입력해주세요.");
+      return;
     }
+    
+    // 1. LocalStorage 저장
+    localStorage.setItem('gemini_api_key', trimmedKey);
+    
+    // 2. 전역 process.env 업데이트 (Gemini SDK 가이드라인 준수용)
+    if (typeof window !== 'undefined') {
+      (window as any).process.env.API_KEY = trimmedKey;
+    }
+    
+    showToast("API 키가 성공적으로 저장되었습니다.");
+    setIsKeyModalOpen(false);
+    setState(prev => ({ ...prev, error: null }));
   };
 
   const handleSearch = useCallback(async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const targetKeyword = state.keyword;
     if (!targetKeyword.trim()) return;
+
+    // API 키 확인
+    if (!process.env.API_KEY) {
+      setIsKeyModalOpen(true);
+      return;
+    }
 
     setState(prev => ({ ...prev, isLoading: true, error: null, results: [], analysis: null }));
     setNewsSources([]); 
@@ -123,18 +143,10 @@ const App: React.FC = () => {
     }
   };
 
-  // [수정된 파싱 로직] 번호가 뭉쳐있어도 강제로 줄을 나눕니다.
   const parseInsights = (text: string) => {
     if (!text) return [];
-
-    // 1. 역슬래시 n(\\n) 글자를 실제 줄바꿈으로 치환
     let processedText = text.replace(/\\n/g, '\n');
-
-    // 2. [핵심] 문장 중간에 " 2. " 처럼 번호가 나타나면 그 직전에 강제로 줄바꿈 삽입
-    // 정규식 설명: (마침표/물음표/느낌표 뒤에) (공백이 있고) (숫자+점)이 오면 줄바꿈 추가
     processedText = processedText.replace(/([.!?])\s*(\d+\.)/g, '$1\n\n$2');
-
-    // 3. 불필요한 참조 및 특수문자 정제
     processedText = processedText
       .replace(/\[제목\]/g, '')
       .replace(/\(참조:[\s\S]*?\)/gi, '')
@@ -142,13 +154,9 @@ const App: React.FC = () => {
       .replace(/\*\*/g, '')
       .trim();
 
-    // 4. 줄바꿈 기준으로 쪼개서 각 항목을 배열로 반환
     return processedText.split('\n')
       .map(line => line.trim())
-      .filter(line => {
-        // "1. " 형태의 번호로 시작하는 문장만 유효한 박스로 생성
-        return /^\d+\.\s/.test(line) && line.length > 5;
-      });
+      .filter(line => /^\d+\.\s/.test(line) && line.length > 5);
   };
 
   const handleDiscussWithAI = () => {
@@ -206,7 +214,10 @@ const App: React.FC = () => {
             <Palette size={20} className="group-hover:rotate-12 transition-transform" /> 디자인 테마 설정
           </button>
           <button 
-            onClick={handleOpenKeySelector}
+            onClick={() => {
+              setTempApiKey(process.env.API_KEY || '');
+              setIsKeyModalOpen(true);
+            }}
             className="w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-black text-slate-500 hover:text-amber-400 hover:bg-white/10 transition-all text-sm group"
           >
             <Key size={20} className="group-hover:scale-110 transition-transform" /> API 키 관리
@@ -332,16 +343,15 @@ const App: React.FC = () => {
         </div>
       </main>
 
+      {/* 디자인 테마 설정 모달 */}
       {showThemeModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-2xl p-6 animate-in fade-in duration-500">
           <div className="bg-[#1e293b] border border-white/10 rounded-[3rem] p-12 w-full max-w-3xl shadow-3xl relative overflow-hidden">
             <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-600/20 blur-[100px] rounded-full -mr-32 -mt-32" />
-            
             <button onClick={() => setShowThemeModal(false)} className="absolute right-10 top-10 text-slate-500 hover:text-white transition-all z-10"><X size={32} /></button>
             <h2 className="text-4xl font-black mb-12 flex items-center gap-5 text-white tracking-tighter z-10 relative">
               <Palette className="text-indigo-400" size={44} /> 디자인 테마 설정
             </h2>
-            
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8 z-10 relative">
               {[
                 { id: 'aurora', name: 'Aurora AI', desc: '고급스러운 오로라 그라데이션과 블러 효과', color: 'bg-gradient-to-br from-indigo-600 to-cyan-500' },
@@ -358,6 +368,74 @@ const App: React.FC = () => {
                   <span className="text-[11px] text-slate-500 font-bold leading-relaxed">{t.desc}</span>
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* API 키 관리 모달 (Vercel 대응 독립 모달) */}
+      {isKeyModalOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/95 backdrop-blur-3xl p-6 animate-in fade-in duration-300">
+          <div className="bg-[#0f172a] border border-white/10 rounded-[2.5rem] p-10 w-full max-w-xl shadow-4xl relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 via-indigo-600 to-purple-600" />
+            <button onClick={() => setIsKeyModalOpen(false)} className="absolute right-8 top-8 text-slate-500 hover:text-white transition-all z-10"><X size={28} /></button>
+            
+            <div className="mb-10 text-center">
+              <div className="w-20 h-20 bg-amber-500/10 rounded-3xl flex items-center justify-center mx-auto mb-6 border border-amber-500/20">
+                <Key size={36} className="text-amber-500" />
+              </div>
+              <h2 className="text-3xl font-black text-white mb-3 tracking-tighter">Gemini API 키 관리</h2>
+              <p className="text-slate-400 text-sm font-medium">서비스 이용을 위해 Google AI Studio에서 발급받은 API 키가 필요합니다.</p>
+            </div>
+
+            <div className="space-y-8 relative z-10">
+              <div className="space-y-3">
+                <div className="flex justify-between items-end">
+                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-[0.15em]">Gemini API Key</label>
+                  <a 
+                    href="https://aistudio.google.com/app/apikey" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-[10px] font-black text-indigo-400 flex items-center gap-1 hover:underline"
+                  >
+                    API 키 발급받기 <ExternalLink size={10} />
+                  </a>
+                </div>
+                <div className="relative group">
+                  <input 
+                    type="password" 
+                    placeholder="AI 키를 입력하세요 (예: AIzaSy...)" 
+                    value={tempApiKey}
+                    onChange={(e) => setTempApiKey(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-2xl py-4.5 pl-6 pr-6 text-white font-mono text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-all placeholder:text-slate-600 shadow-inner"
+                  />
+                </div>
+              </div>
+
+              <div className="bg-amber-500/5 border border-amber-500/10 rounded-2xl p-5 flex gap-4 items-start">
+                <ShieldAlert size={20} className="text-amber-500 shrink-0 mt-1" />
+                <div className="space-y-1.5">
+                  <p className="text-[11px] font-black text-amber-500 uppercase tracking-widest">Security Warning</p>
+                  <p className="text-[11px] text-slate-400 leading-relaxed font-medium">
+                    입력하신 API 키는 브라우저의 로컬 저장소(LocalStorage)에 안전하게 저장되며, 어떠한 서버로도 전송되지 않습니다.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button 
+                  onClick={() => setIsKeyModalOpen(false)}
+                  className="flex-1 py-4.5 rounded-2xl font-black text-sm text-slate-400 bg-white/5 hover:bg-white/10 transition-all active:scale-95"
+                >
+                  취소
+                </button>
+                <button 
+                  onClick={handleSaveApiKey}
+                  className="flex-[2] py-4.5 rounded-2xl font-black text-sm text-white bg-indigo-600 hover:bg-indigo-500 shadow-2xl shadow-indigo-600/20 flex items-center justify-center gap-2 transition-all active:scale-95"
+                >
+                  <Save size={18} /> API 키 저장 및 적용
+                </button>
+              </div>
             </div>
           </div>
         </div>
