@@ -58,6 +58,14 @@ const App: React.FC = () => {
     setTimeout(() => setToast({ visible: false, message: '' }), 2500);
   };
 
+  // 앱 시작 시 localStorage에서 키를 불러와 process.env.API_KEY에 주입
+  useEffect(() => {
+    const savedKey = localStorage.getItem('gemini_api_key');
+    if (savedKey && typeof window !== 'undefined') {
+      (window as any).process.env.API_KEY = savedKey;
+    }
+  }, []);
+
   // API 키 저장 핸들러
   const handleSaveApiKey = () => {
     const trimmedKey = tempApiKey.trim();
@@ -80,15 +88,26 @@ const App: React.FC = () => {
   };
 
   const handleSearch = useCallback(async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+    // 이벤트 전파 및 기본 동작 차단 (Vercel 환경 충돌 방지)
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
     const targetKeyword = state.keyword;
     if (!targetKeyword.trim()) return;
 
-    // API 키 확인
-    if (!process.env.API_KEY) {
+    // API 키 확인 (localStorage와 process.env를 모두 체크)
+    const currentApiKey = (window as any).process?.env?.API_KEY || localStorage.getItem('gemini_api_key');
+    
+    if (!currentApiKey) {
+      setTempApiKey('');
       setIsKeyModalOpen(true);
       return;
     }
+
+    // 로드 중이 아닐 때만 실행
+    if (state.isLoading) return;
 
     setState(prev => ({ ...prev, isLoading: true, error: null, results: [], analysis: null }));
     setNewsSources([]); 
@@ -114,8 +133,9 @@ const App: React.FC = () => {
       }
     } catch (err: any) {
       setState(prev => ({ ...prev, isLoading: false, error: err.message || '오류 발생' }));
+      showToast("분석 중 오류가 발생했습니다. API 키를 확인해주세요.");
     }
-  }, [state.keyword]);
+  }, [state.keyword, state.isLoading]);
 
   const getThemeStyles = () => {
     switch(theme) {
@@ -192,12 +212,14 @@ const App: React.FC = () => {
 
           <nav className="space-y-3">
             <button 
+              type="button"
               onClick={() => setActiveTab('dashboard')}
               className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-black transition-all text-sm ${activeTab === 'dashboard' ? 'bg-indigo-600/20 text-indigo-400 shadow-inner' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'}`}
             >
               <LayoutDashboard size={20} /> 대시보드
             </button>
             <button 
+              type="button"
               onClick={() => setActiveTab('insights')}
               className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-black transition-all text-sm ${activeTab === 'insights' ? 'bg-indigo-600/20 text-indigo-400 shadow-inner' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'}`}
             >
@@ -208,14 +230,17 @@ const App: React.FC = () => {
 
         <div className="mt-auto p-8 space-y-4 border-t border-white/5">
           <button 
+            type="button"
             onClick={() => setShowThemeModal(true)}
             className="w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-black text-slate-500 hover:text-indigo-400 hover:bg-white/10 transition-all text-sm group"
           >
             <Palette size={20} className="group-hover:rotate-12 transition-transform" /> 디자인 테마 설정
           </button>
           <button 
+            type="button"
             onClick={() => {
-              setTempApiKey(process.env.API_KEY || '');
+              const currentKey = (window as any).process?.env?.API_KEY || localStorage.getItem('gemini_api_key') || '';
+              setTempApiKey(currentKey);
               setIsKeyModalOpen(true);
             }}
             className="w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-black text-slate-500 hover:text-amber-400 hover:bg-white/10 transition-all text-sm group"
@@ -231,12 +256,19 @@ const App: React.FC = () => {
             <form onSubmit={handleSearch} className="relative flex items-center">
               <input 
                 type="text" 
-                placeholder="트렌드 키워드나 분석하고 싶은 뉴스 주제를 입력하세요..." 
+                placeholder="트렌드 키워드를 입력하고 엔터를 누르세요..." 
                 className={`w-full ${themeStyle.card} rounded-3xl py-5 pl-16 pr-16 text-white focus:outline-none focus:ring-4 focus:ring-indigo-500/30 transition-all placeholder:text-slate-600 font-bold text-xl shadow-2xl`}
                 value={state.keyword}
                 onChange={(e) => setState(prev => ({ ...prev, keyword: e.target.value }))}
+                disabled={state.isLoading}
               />
-              <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-500" size={26} />
+              <button 
+                type="submit" 
+                className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-500 hover:text-indigo-400 transition-colors"
+                disabled={state.isLoading}
+              >
+                <Search size={26} />
+              </button>
               {state.isLoading && (
                 <div className="absolute right-6 top-1/2 -translate-y-1/2">
                   <Loader2 className="animate-spin text-indigo-500" size={26} />
@@ -260,6 +292,7 @@ const App: React.FC = () => {
                         </div>
                         <div className="flex items-center gap-4">
                           <button 
+                            type="button"
                             onClick={handleDiscussWithAI}
                             className="flex items-center gap-2 px-5 py-2.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded-2xl transition-all font-black text-xs group"
                           >
@@ -360,6 +393,7 @@ const App: React.FC = () => {
               ].map(t => (
                 <button 
                   key={t.id}
+                  type="button"
                   onClick={() => { setTheme(t.id as ThemeType); setShowThemeModal(false); }}
                   className={`flex flex-col p-8 rounded-[2.5rem] border-2 transition-all text-left group h-full ${theme === t.id ? 'border-indigo-500 bg-indigo-500/10' : 'border-white/5 bg-white/5 hover:border-white/20'}`}
                 >
@@ -408,6 +442,9 @@ const App: React.FC = () => {
                     value={tempApiKey}
                     onChange={(e) => setTempApiKey(e.target.value)}
                     className="w-full bg-white/5 border border-white/10 rounded-2xl py-4.5 pl-6 pr-6 text-white font-mono text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-all placeholder:text-slate-600 shadow-inner"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveApiKey();
+                    }}
                   />
                 </div>
               </div>
@@ -424,12 +461,14 @@ const App: React.FC = () => {
 
               <div className="flex gap-3 pt-2">
                 <button 
+                  type="button"
                   onClick={() => setIsKeyModalOpen(false)}
                   className="flex-1 py-4.5 rounded-2xl font-black text-sm text-slate-400 bg-white/5 hover:bg-white/10 transition-all active:scale-95"
                 >
                   취소
                 </button>
                 <button 
+                  type="button"
                   onClick={handleSaveApiKey}
                   className="flex-[2] py-4.5 rounded-2xl font-black text-sm text-white bg-indigo-600 hover:bg-indigo-500 shadow-2xl shadow-indigo-600/20 flex items-center justify-center gap-2 transition-all active:scale-95"
                 >
