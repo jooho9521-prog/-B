@@ -68,8 +68,11 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
    */
   const sendMessageWithRetry = async (message: string, retries = 3, delay = 2000): Promise<string> => {
     try {
-      // API 호출 직전 인스턴스 생성 (가이드라인 준수)
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      // LocalStorage에서 키를 직접 조회 (Vercel 배포 환경 대응)
+      const apiKey = localStorage.getItem('gemini_api_key') || (window as any).process?.env?.API_KEY;
+      if (!apiKey) throw new Error("API Key must be set");
+
+      const ai = new GoogleGenAI({ apiKey });
       
       const systemInstruction = `당신은 'TrendPulse'의 전문 트렌드 분석가 비서입니다.
 현재 분석 중인 키워드: ${keyword || '없음'}
@@ -99,6 +102,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
       const response = await chat.sendMessage({ message });
       return response.text || "응답을 생성할 수 없습니다.";
     } catch (error: any) {
+      console.error("Gemini Chat Error Details:", error);
       const errorStr = JSON.stringify(error);
       const isTransient = errorStr.includes("503") || errorStr.includes("overloaded") || errorStr.includes("429");
 
@@ -117,9 +121,10 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
       setMessages(prev => [...prev, { id: Date.now() + 1, text: aiText, sender: 'ai' }]);
     } catch (error: any) {
       console.error("AI Chat Error:", error);
-      let friendlyMessage = "요청하신 내용을 바탕으로 콘텐츠 재사용(OSMU) 및 품질 개선 방안을 검토 중입니다.";
-      if (!process.env.API_KEY) {
-        friendlyMessage = "API 키가 설정되지 않았습니다. 관리자 설정을 확인해주세요.";
+      let friendlyMessage = "요청하신 내용을 분석하던 중 오류가 발생했습니다. 나중에 다시 시도해주세요.";
+      const apiKey = localStorage.getItem('gemini_api_key');
+      if (!apiKey) {
+        friendlyMessage = "🚨 API 키가 설정되지 않았습니다. 좌측 하단 'API 키 관리'에서 키를 먼저 등록해주세요.";
       }
       setMessages(prev => [...prev, { id: Date.now() + 1, text: friendlyMessage, sender: 'ai' }]);
     } finally {
@@ -137,15 +142,32 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
     setInputText("");
 
     const smartResponse = handleSmartResponse(trimmedText);
+    const isSmartKeyword = trimmedText.includes("투자") || trimmedText.includes("성우") || trimmedText.includes("해외") || trimmedText.includes("확인");
     
-    // 특정 키워드에 대해 스마트 응답 우선 처리, 그 외에는 Gemini API 호출
-    if (smartResponse && (trimmedText.includes("투자") || trimmedText.includes("성우") || trimmedText.includes("해외") || trimmedText.includes("확인"))) {
+    // 특정 키워드에 대해 스마트 응답 우선 처리
+    if (smartResponse && isSmartKeyword) {
       setIsThinking(true);
       setTimeout(() => {
         setMessages(prev => [...prev, { id: Date.now() + 1, text: smartResponse, sender: 'ai' }]);
         setIsThinking(false);
       }, 800);
     } else {
+      // 2. [핵심 수정] 로컬 스토리지에서 API 키 확인
+      const apiKey = localStorage.getItem('gemini_api_key');
+
+      if (!apiKey) {
+        setIsThinking(true);
+        setTimeout(() => {
+          setIsThinking(false);
+          setMessages(prev => [...prev, { 
+            id: Date.now() + 1, 
+            text: "🚨 API 키가 설정되지 않았습니다. 좌측 하단 'API 키 관리'에서 키를 먼저 등록해주세요.", 
+            sender: 'ai' 
+          }]);
+        }, 600);
+        return;
+      }
+
       handleAiResponse(trimmedText);
     }
   };
