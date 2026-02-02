@@ -102,8 +102,9 @@ const App: React.FC = () => {
     const targetKeyword = state.keyword;
     if (!targetKeyword.trim()) return;
 
-    // API 키 확인 (우선순위: 전역 변수 -> LocalStorage)
-    const currentApiKey = (window as any).process?.env?.API_KEY || localStorage.getItem('gemini_api_key');
+    // API 키 존재 여부 강제 확인 (LocalStorage 직접 조회)
+    const savedKey = localStorage.getItem('gemini_api_key');
+    const currentApiKey = savedKey || (window as any).process?.env?.API_KEY;
     
     if (!currentApiKey) {
       setTempApiKey('');
@@ -137,8 +138,9 @@ const App: React.FC = () => {
         ]);
       }
     } catch (err: any) {
+      console.error("Search Analysis Error:", err);
       setState(prev => ({ ...prev, isLoading: false, error: err.message || '오류 발생' }));
-      showToast("분석 엔진 호출에 실패했습니다. API 키를 확인해주세요.");
+      showToast("분석 엔진 호출에 실패했습니다. API 키와 네트워크를 확인해주세요.");
     }
   }, [state.keyword, state.isLoading]);
 

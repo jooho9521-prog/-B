@@ -2,6 +2,16 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { NewsItem, TrendAnalysis } from "../types";
 
+/**
+ * API 키를 안전하게 가져오는 헬퍼 함수
+ * LocalStorage를 최우선으로 확인하고, 없으면 process.env를 확인합니다.
+ */
+const getApiKey = (): string => {
+  const savedKey = typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') : null;
+  const apiKey = savedKey || process.env.API_KEY || "";
+  return apiKey;
+};
+
 const extractErrorMessage = (error: any): string => {
   if (!error) return "알 수 없는 오류가 발생했습니다.";
   
@@ -67,68 +77,71 @@ export class GeminiTrendService {
       
       반드시 검색 도구(googleSearch)를 사용하여 실시간 데이터를 참조하고, 참고한 실제 기사들의 URL을 함께 제공해야 합니다.`;
       
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              summary: { type: Type.STRING, description: "5-point numbered list summary" },
-              sentiment: { type: Type.STRING, enum: ['positive', 'neutral', 'negative'] },
-              keyPoints: { type: Type.ARRAY, items: { type: Type.STRING }, description: "3-5 key takeaway points" },
-              growthScore: { type: Type.NUMBER, description: "Score from 0 to 100" }
-            },
-            required: ["summary", "sentiment", "keyPoints", "growthScore"]
-          }
-        },
-      });
-
-      // 1. 그라운딩 데이터 추출 (데이터 소스)
-      const groundingMetadata = response.candidates?.[0]?.groundingMetadata;
-      let news: NewsItem[] = [];
-
-      if (groundingMetadata?.groundingChunks) {
-        news = groundingMetadata.groundingChunks.map((chunk: any, index: number) => {
-          const web = chunk.web;
-          const uri = web?.uri || '#';
-          const title = web?.title || chunk.text || `${keyword} 관련 분석 뉴스 ${index + 1}`;
-          let source = 'AI 리서치 센터';
-          
-          if (uri && uri !== '#') {
-            try {
-              source = new URL(uri).hostname.replace('www.', '');
-            } catch (e) {}
-          }
-          
-          return { title, uri, source };
-        }).filter((item: NewsItem) => item.uri !== '#');
-      }
-
-      // 2. 검색 결과가 아예 없을 경우를 위한 폴백(Fallback) 데이터 생성
-      if (news.length === 0) {
-        news = [
-          { 
-            title: `${keyword} 관련 실시간 트렌드 분석 보고서`, 
-            uri: `https://www.google.com/search?q=${encodeURIComponent(keyword)}+news`, 
-            source: 'Google News (Real-time)' 
-          },
-          { 
-            title: `${keyword} 산업 동향 및 기술 스택 리서치`, 
-            uri: `https://search.naver.com/search.naver?where=news&query=${encodeURIComponent(keyword)}`, 
-            source: 'Naver News (Live)' 
-          }
-        ];
-      }
-
       try {
+        const apiKey = getApiKey();
+        if (!apiKey) throw new Error("API 키가 설정되지 않았습니다.");
+
+        const ai = new GoogleGenAI({ apiKey });
+        const response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: prompt,
+          config: {
+            tools: [{ googleSearch: {} }],
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                summary: { type: Type.STRING, description: "5-point numbered list summary" },
+                sentiment: { type: Type.STRING, enum: ['positive', 'neutral', 'negative'] },
+                keyPoints: { type: Type.ARRAY, items: { type: Type.STRING }, description: "3-5 key takeaway points" },
+                growthScore: { type: Type.NUMBER, description: "Score from 0 to 100" }
+              },
+              required: ["summary", "sentiment", "keyPoints", "growthScore"]
+            }
+          },
+        });
+
+        // 1. 그라운딩 데이터 추출
+        const groundingMetadata = response.candidates?.[0]?.groundingMetadata;
+        let news: NewsItem[] = [];
+
+        if (groundingMetadata?.groundingChunks) {
+          news = groundingMetadata.groundingChunks.map((chunk: any, index: number) => {
+            const web = chunk.web;
+            const uri = web?.uri || '#';
+            const title = web?.title || chunk.text || `${keyword} 관련 분석 뉴스 ${index + 1}`;
+            let source = 'AI 리서치 센터';
+            
+            if (uri && uri !== '#') {
+              try {
+                source = new URL(uri).hostname.replace('www.', '');
+              } catch (e) {}
+            }
+            
+            return { title, uri, source };
+          }).filter((item: NewsItem) => item.uri !== '#');
+        }
+
+        if (news.length === 0) {
+          news = [
+            { 
+              title: `${keyword} 관련 실시간 트렌드 분석 보고서`, 
+              uri: `https://www.google.com/search?q=${encodeURIComponent(keyword)}+news`, 
+              source: 'Google News (Real-time)' 
+            },
+            { 
+              title: `${keyword} 산업 동향 및 기술 스택 리서치`, 
+              uri: `https://search.naver.com/search.naver?where=news&query=${encodeURIComponent(keyword)}`, 
+              source: 'Naver News (Live)' 
+            }
+          ];
+        }
+
         const analysis = JSON.parse(response.text);
         return { news, analysis };
-      } catch (e) {
-        throw new Error("분석 데이터를 처리하는 중 오류가 발생했습니다.");
+      } catch (err: any) {
+        console.error("API Call Error:", err);
+        throw new Error(handleApiError(err));
       }
     });
   }
@@ -137,7 +150,10 @@ export class GeminiTrendService {
 export const generateExpandedContent = async (originalSummary: string, type: 'image' | 'video' | 'sns', stylePrompt?: string) => {
   return withRetry(async () => {
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const apiKey = getApiKey();
+      if (!apiKey) throw new Error("API 키가 설정되지 않았습니다.");
+
+      const ai = new GoogleGenAI({ apiKey });
       let prompt = "";
       let config: any = {};
 
@@ -169,7 +185,7 @@ ${originalSummary}`;
           video: `(TTS 낭독용 스크립트): ${originalSummary}`,
           sns: `다음 내용을 바탕으로 인스타그램 게시물 문구와 해시태그를 한국어로 작성해줘: ${originalSummary}`
         };
-        prompt = prompts[type];
+        prompt = prompts[type as 'video' | 'sns'];
       }
 
       const response = await ai.models.generateContent({
@@ -179,6 +195,7 @@ ${originalSummary}`;
       });
       return response.text;
     } catch (error) {
+      console.error("Content Expansion Error:", error);
       throw new Error(handleApiError(error));
     }
   });
@@ -186,48 +203,64 @@ ${originalSummary}`;
 
 export const generateTTS = async (text: string, voiceName: string, styleInstruction?: string) => {
   return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const fullPrompt = styleInstruction ? `Say ${styleInstruction}: ${text}` : text;
-    
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text: fullPrompt }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName },
+    try {
+      const apiKey = getApiKey();
+      if (!apiKey) throw new Error("API 키가 설정되지 않았습니다.");
+
+      const ai = new GoogleGenAI({ apiKey });
+      const fullPrompt = styleInstruction ? `Say ${styleInstruction}: ${text}` : text;
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: [{ parts: [{ text: fullPrompt }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName },
+            },
           },
         },
-      },
-    });
-    
-    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!base64Audio) throw new Error("Audio generation failed");
-    return base64Audio;
+      });
+      
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (!base64Audio) throw new Error("Audio generation failed");
+      return base64Audio;
+    } catch (error) {
+      console.error("TTS Generation Error:", error);
+      throw new Error(handleApiError(error));
+    }
   });
 };
 
 export const generateVideoWithVeo = async (prompt: string, imageBase64?: string): Promise<string | null> => {
   return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const videoConfig: any = {
-      model: 'veo-3.1-fast-generate-preview',
-      prompt: `Professional motion graphics: ${prompt}`,
-      config: { numberOfVideos: 1, resolution: '720p', aspectRatio: '9:16' }
-    };
+    try {
+      const apiKey = getApiKey();
+      if (!apiKey) throw new Error("API 키가 설정되지 않았습니다.");
 
-    if (imageBase64) {
-      const pureBase64 = imageBase64.includes('base64,') ? imageBase64.split('base64,')[1] : imageBase64;
-      videoConfig.image = { imageBytes: pureBase64, mimeType: 'image/png' };
-    }
+      const ai = new GoogleGenAI({ apiKey });
+      const videoConfig: any = {
+        model: 'veo-3.1-fast-generate-preview',
+        prompt: `Professional motion graphics: ${prompt}`,
+        config: { numberOfVideos: 1, resolution: '720p', aspectRatio: '9:16' }
+      };
 
-    let operation = await ai.models.generateVideos(videoConfig);
-    while (!operation.done) {
-      await new Promise(resolve => setTimeout(resolve, 10000));
-      operation = await ai.operations.getVideosOperation({ operation: operation });
+      if (imageBase64) {
+        const pureBase64 = imageBase64.includes('base64,') ? imageBase64.split('base64,')[1] : imageBase64;
+        videoConfig.image = { imageBytes: pureBase64, mimeType: 'image/png' };
+      }
+
+      let operation = await ai.models.generateVideos(videoConfig);
+      while (!operation.done) {
+        await new Promise(resolve => setTimeout(resolve, 10000));
+        operation = await ai.operations.getVideosOperation({ operation: operation });
+      }
+      const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+      return downloadLink ? `${downloadLink}&key=${apiKey}` : null;
+    } catch (error) {
+      console.error("Veo Video Generation Error:", error);
+      throw new Error(handleApiError(error));
     }
-    const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
-    return downloadLink ? `${downloadLink}&key=${process.env.API_KEY}` : null;
   });
 };
