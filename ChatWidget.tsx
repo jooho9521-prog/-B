@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MessageSquare, X, Send, Bot, Loader2, Sparkles } from 'lucide-react';
 import { GoogleGenAI, Chat, Content } from '@google/genai';
 import { TrendAnalysis } from './types';
+import { extractErrorMessage } from './services/geminiService';
 
 interface ChatWidgetProps {
   analysis?: TrendAnalysis | null;
@@ -64,11 +65,10 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
 
   /**
    * Gemini API 가이드라인을 준수하여, API 호출 직전에 신규 GoogleGenAI 인스턴스를 생성합니다.
-   * 이는 사용자가 API 키를 변경했을 때 즉시 반영되도록 하기 위함입니다.
+   * 503 Overloaded 에러 대응을 위해 재시도 로직이 강화되었습니다.
    */
-  const sendMessageWithRetry = async (message: string, retries = 3, delay = 2000): Promise<string> => {
+  const sendMessageWithRetry = async (message: string, retries = 5, delay = 4000): Promise<string> => {
     try {
-      // LocalStorage에서 키를 직접 조회 (Vercel 배포 환경 대응)
       const apiKey = localStorage.getItem('gemini_api_key') || (window as any).process?.env?.API_KEY;
       if (!apiKey) throw new Error("API Key must be set");
 
@@ -82,9 +82,8 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
 데이터가 없는 경우 사용자가 키워드를 검색하도록 안내하세요.
 답변은 간결하게(3문장 내외) 작성하는 것이 좋습니다.`;
 
-      // 기존 대화 내역을 Gemini SDK의 history 포맷으로 변환하여 문맥을 유지합니다.
       const history: Content[] = messages
-        .filter(m => m.id !== 1) // 첫 번째 AI 환영 인사는 제외
+        .filter(m => m.id !== 1)
         .map(m => ({
           role: m.sender === 'user' ? 'user' : 'model',
           parts: [{ text: m.text }]
@@ -103,10 +102,17 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
       return response.text || "응답을 생성할 수 없습니다.";
     } catch (error: any) {
       console.error("Gemini Chat Error Details:", error);
-      const errorStr = JSON.stringify(error);
-      const isTransient = errorStr.includes("503") || errorStr.includes("overloaded") || errorStr.includes("429");
+      const rawMsg = extractErrorMessage(error).toLowerCase();
+      const isTransient = 
+        rawMsg.includes("503") || 
+        rawMsg.includes("overloaded") || 
+        rawMsg.includes("unavailable") ||
+        rawMsg.includes("429") || 
+        rawMsg.includes("resource_exhausted") || 
+        rawMsg.includes("quota");
 
       if (retries > 0 && isTransient) {
+        console.warn(`[Chat Retry] ${delay/1000}초 후 재시도... (${retries})`);
         await new Promise(resolve => setTimeout(resolve, delay));
         return sendMessageWithRetry(message, retries - 1, delay * 1.5);
       }
@@ -121,11 +127,17 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
       setMessages(prev => [...prev, { id: Date.now() + 1, text: aiText, sender: 'ai' }]);
     } catch (error: any) {
       console.error("AI Chat Error:", error);
+      const rawMsg = extractErrorMessage(error).toLowerCase();
       let friendlyMessage = "요청하신 내용을 분석하던 중 오류가 발생했습니다. 나중에 다시 시도해주세요.";
-      const apiKey = localStorage.getItem('gemini_api_key');
-      if (!apiKey) {
+      
+      if (rawMsg.includes("overloaded") || rawMsg.includes("503")) {
+        friendlyMessage = "⚠️ 현재 AI 모델 서버가 혼잡하여 응답이 지연되고 있습니다. 잠시 후 다시 질문해 주세요.";
+      } else if (rawMsg.includes("quota") || rawMsg.includes("429")) {
+        friendlyMessage = "⏳ API 호출 한도가 초과되었습니다. 잠시 후 다시 이용해 주세요.";
+      } else if (!localStorage.getItem('gemini_api_key')) {
         friendlyMessage = "🚨 API 키가 설정되지 않았습니다. 좌측 하단 'API 키 관리'에서 키를 먼저 등록해주세요.";
       }
+      
       setMessages(prev => [...prev, { id: Date.now() + 1, text: friendlyMessage, sender: 'ai' }]);
     } finally {
       setIsThinking(false);
@@ -136,7 +148,6 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
     const trimmedText = text.trim();
     if (!trimmedText || isThinking) return;
     
-    // UI에 사용자 메시지 즉시 추가
     const userMessage = { id: Date.now(), text: trimmedText, sender: 'user' };
     setMessages(prev => [...prev, userMessage]);
     setInputText("");
@@ -144,7 +155,6 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
     const smartResponse = handleSmartResponse(trimmedText);
     const isSmartKeyword = trimmedText.includes("투자") || trimmedText.includes("성우") || trimmedText.includes("해외") || trimmedText.includes("확인");
     
-    // 특정 키워드에 대해 스마트 응답 우선 처리
     if (smartResponse && isSmartKeyword) {
       setIsThinking(true);
       setTimeout(() => {
@@ -152,9 +162,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
         setIsThinking(false);
       }, 800);
     } else {
-      // 2. [핵심 수정] 로컬 스토리지에서 API 키 확인
       const apiKey = localStorage.getItem('gemini_api_key');
-
       if (!apiKey) {
         setIsThinking(true);
         setTimeout(() => {
@@ -167,7 +175,6 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ analysis, externalCommand, keyw
         }, 600);
         return;
       }
-
       handleAiResponse(trimmedText);
     }
   };
