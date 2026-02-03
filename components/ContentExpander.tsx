@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { generateExpandedContent, generateTTS } from '../services/geminiService';
 import { generateImage } from '../services/imageService';
@@ -288,7 +287,7 @@ const ContentExpander: React.FC<Props> = ({ summary, expandedData, setExpandedDa
     }
   };
 
-  const handleRegenerateImageOnly = async () => {
+  const handleRegenerateImageOnly = async (manualPrompt?: string) => {
     const apiKey = localStorage.getItem('gemini_api_key') || (window as any).process?.env?.API_KEY;
     if (!apiKey) {
       onShowToast("❌ API 키를 먼저 설정해주세요.");
@@ -301,7 +300,10 @@ const ContentExpander: React.FC<Props> = ({ summary, expandedData, setExpandedDa
     try {
       const stylePrompt = IMAGE_STYLES.find(s => s.id === selectedStyleId)?.prompt;
       const { title, body } = expandedData.image.cardData;
-      const variationPrompt = `Generate a cinematic news background for: ${title}. ${body.substring(0, 100)}. Professional quality, no text. Style requirement: ${stylePrompt || 'modern cinematic'}`;
+      
+      // 사용자가 직접 편집한 프롬프트가 있으면 그것을 우선 사용
+      const variationPrompt = manualPrompt || `Generate a cinematic news background for: ${title}. ${body.substring(0, 100)}. Professional quality, no text. Style requirement: ${stylePrompt || 'modern cinematic'}`;
+      
       const newImgUrl = await generateImage(variationPrompt, stylePrompt);
       if (newImgUrl) {
         setExpandedData(prev => ({ 

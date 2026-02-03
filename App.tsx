@@ -156,25 +156,30 @@ const App: React.FC = () => {
 
     let processed = text.replace(/\\n/g, '\n');
 
-    // 1. [기존] URL 및 참조 문구 삭제
-    processed = processed.replace(/\(참조:[\s\S]*?\)/gi, '');
-    processed = processed.replace(/(참조|출처|Source):\s*https?:\/\/[^\s\n]+/gi, '');
-    processed = processed.replace(/https?:\/\/[^\s\)]+/g, '');
-    
-    // 2. [신규] 빈 괄호 및 잔여 특수문자 청소 (여기가 핵심입니다!)
+    // 1. [청소] URL 및 참조 문구 제거
+    processed = processed.replace(/\(참조:[\s\S]*?\)/gi, '')
+      .replace(/(참조|출처|Source):\s*https?:\/\/[^\s\n]+/gi, '')
+      .replace(/https?:\/\/[^\s\)]+/g, '');
+
+    // 2. [핵심 1] 괄호 찌꺼기 완벽 제거 (순서 중요)
     processed = processed
-      .replace(/\(\s*\)/g, '')       // 내용이 없는 빈 괄호 '( )' 삭제
-      .replace(/\(\s*$/g, '')        // 문장 끝에 홀로 남은 여는 괄호 '(' 삭제
-      .replace(/^\s*[\)\].]+\s*/, '') // 혹시 문장 앞에 남은 닫는 괄호 삭제
-      .replace(/\s{2,}/g, ' ');      // 다 지우고 남은 두 칸 이상의 공백을 한 칸으로
+      .replace(/\(\s*\)/g, '')        // 빈 괄호 () 삭제
+      .replace(/\(\s*$/gm, '')        // 줄 끝에 있는 ( 삭제
+      .replace(/\($/gm, '')           // 줄 끝에 딱 붙은 ( 삭제
+      .replace(/\s+\($/g, '');        // 문장 끝 공백 뒤의 ( 삭제
 
-    // 3. [기존] 번호 서식 정리
-    processed = processed.replace(/([.!?])\s*(\d+\.)/g, '$1\n\n$2');
-    processed = processed.replace(/\*\*/g, '').replace(/\[.*?\]/g, '').trim();
+    // 3. [핵심 2] 줄바꿈 강제 집행 (마침표 유무 상관없음)
+    // 조건: "공백 + 숫자 + 점 + 공백" 패턴이면 무조건 줄바꿈 (예: "진입함 2. " -> "진입함\n\n2. ")
+    // 주의: 2.5% 같은 소수점은 건드리지 않도록 숫자 뒤에 반드시 공백(\s)이 있을 때만 적용
+    processed = processed.replace(/(\s)(\d+\.\s)/g, '\n\n$2');
 
+    // 4. 배열 변환 (번호로 시작하는 문장만 필터링)
     return processed.split('\n')
       .map(line => line.trim())
-      .filter(line => /^\d+\.\s/.test(line) && line.length > 10);
+      .filter(line => {
+        // 숫자+점(1.)으로 시작하고 내용이 5글자 이상인 경우만 박스로 생성
+        return /^\d+\.\s/.test(line) && line.length > 5;
+      });
   };
 
   const handleDiscussWithAI = () => {

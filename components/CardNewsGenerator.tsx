@@ -1,6 +1,5 @@
-
 import React, { useRef, useEffect, useState } from 'react';
-import { Download, Edit3, RefreshCw, Video, Loader2, Film, Clock, Sparkles, Palette, Zap, Database, Type } from 'lucide-react';
+import { Download, Edit3, RefreshCw, Video, Loader2, Film, Clock, Sparkles, Palette, Zap, Database, Type, Wand2 } from 'lucide-react';
 import { generateVideoWithVeo } from '../services/geminiService';
 import { IMAGE_STYLE_CATEGORIES, IMAGE_STYLES } from '../constants/imageStyles';
 import html2canvas from 'html2canvas';
@@ -17,7 +16,7 @@ interface Props {
   setSelectedCategory: (cat: string) => void;
   selectedStyleId: number;
   setSelectedStyleId: (id: number) => void;
-  onRegenerate: () => void;
+  onRegenerate: (prompt: string) => void;
 }
 
 // 폰트 리스트
@@ -72,6 +71,17 @@ const CardNewsGenerator: React.FC<Props> = ({
   const [headlineSize, setHeadlineSize] = useState(88);
   const [bodySize, setBodySize] = useState(42);
   const [selectedFont, setSelectedFont] = useState(FONT_OPTIONS[0].family);
+
+  // [신규] 프롬프트 관리 상태
+  const [customPrompt, setCustomPrompt] = useState("Professional and futuristic business background related to: " + (headline || "Technology trends"));
+  const [isPromptEdited, setIsPromptEdited] = useState(false);
+
+  // 헤드라인이 바뀔 때마다 프롬프트 초안 자동 업데이트 (사용자가 수정한 적 없을 때만)
+  useEffect(() => {
+    if (headline && !isPromptEdited) {
+      setCustomPrompt(`High quality, realistic, cinematic lighting, 4k, concept art related to: ${headline}`);
+    }
+  }, [headline, isPromptEdited]);
 
   const formatPreviewText = (text: string) => {
     if (!text) return "";
@@ -310,6 +320,11 @@ const CardNewsGenerator: React.FC<Props> = ({
     requestAnimationFrame(animate);
   };
 
+  const handlePromptChange = (val: string) => {
+    setCustomPrompt(val);
+    if (!isPromptEdited) setIsPromptEdited(true);
+  };
+
   return (
     <div className="flex flex-col lg:flex-row gap-12">
       <div className="w-full lg:w-[450px] space-y-6">
@@ -423,13 +438,30 @@ const CardNewsGenerator: React.FC<Props> = ({
                <label className="text-[11px] font-black text-slate-500 flex items-center gap-2 uppercase tracking-widest"><Palette size={14} /> 디자인 테마 설정</label>
                {imageUrl && (
                  <button 
-                  onClick={onRegenerate} 
+                  onClick={() => onRegenerate(customPrompt)} 
                   disabled={isRegeneratingImage}
                   className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-[12px] font-black transition-all shadow-lg shadow-indigo-600/20 active:scale-95 disabled:opacity-50"
                  >
                    <RefreshCw size={16} className={isRegeneratingImage ? 'animate-spin' : ''} /> 🔄 이미지 재생성
                  </button>
                )}
+            </div>
+
+            {/* [신규] 프롬프트 편집 UI */}
+            <div className="p-4 bg-white/5 border border-white/10 rounded-2xl shadow-inner animate-in fade-in duration-300">
+              <div className="flex justify-between items-center mb-2">
+                <label className="text-[10px] font-black text-indigo-400 flex items-center gap-1 uppercase tracking-widest">
+                  <Wand2 size={12} /> AI 이미지 프롬프트 편집
+                </label>
+                <span className="text-[9px] font-bold text-slate-600 uppercase">Custom Prompting Mode</span>
+              </div>
+              <textarea
+                value={customPrompt}
+                onChange={(e) => handlePromptChange(e.target.value)}
+                className="w-full bg-black/30 text-white text-[13px] p-4 rounded-xl border border-white/5 focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none resize-none h-24 font-medium custom-scrollbar-thin"
+                placeholder="영문으로 분위기를 묘사해보세요. 예: Futuristic city, cinematic lighting, blue neon..."
+              />
+              <p className="mt-2 text-[10px] text-slate-500 leading-tight">원하는 배경 분위기를 상세하게 영어로 입력하면 AI가 더욱 정교하게 반영합니다.</p>
             </div>
 
             <div className="space-y-4">
